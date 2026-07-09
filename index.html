@@ -17,6 +17,9 @@
     --ink: #4A3728;
     --ink-soft: #8A7860;
     --ink-muted: #A69378;
+    --gift-bg: #FBEFE7;
+    --gift-text: #B0533F;
+    --gift-border: #E8C4AC;
   }
   * { box-sizing: border-box; }
   body {
@@ -94,21 +97,54 @@
     position: relative; z-index: 1;
   }
   .course-item:last-child { border-bottom: none; padding-bottom: 0; }
-  .course-name {
-    font-size: 14px; font-weight: 600; color: var(--ink);
+  .course-top-row {
+    display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 10px;
+  }
+  .course-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .course-type-tag {
+    font-size: 10px; letter-spacing: 0.05em;
+    color: var(--gold-deep);
+    background: #F3E9D6;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .course-type-tag.gift {
+    color: var(--gift-text);
+    background: var(--gift-bg);
+    border: 1px solid var(--gift-border);
+  }
+  .course-item.gift {
+    background: linear-gradient(180deg, rgba(251,239,231,0.6), transparent);
+    margin: 0 -10px;
+    padding: 16px 10px;
+    border-radius: 12px;
+    border-bottom: 1px dashed var(--gift-border);
   }
   .course-balance {
     font-family: 'Noto Serif TC', serif;
     font-size: 26px; font-weight: 700; color: var(--gold-deep);
   }
   .course-balance span { font-size: 12px; font-weight: 500; margin-left: 4px; color: var(--ink-muted); }
-  .course-progress-top { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft); margin: 10px 0 6px; }
+  .course-progress-top { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
+  .course-note {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--gift-text);
+    background: var(--gift-bg);
+    border-radius: 6px;
+    padding: 5px 9px;
+    display: inline-block;
+  }
   .progress-bar { height: 6px; border-radius: 999px; background: #EFE6D3; overflow: hidden; }
   .progress-fill {
     height: 100%; border-radius: 999px;
     background: linear-gradient(90deg, var(--gold), var(--gold-deep));
     width: 0%; transition: width 0.8s ease;
+  }
+  .progress-fill.gift {
+    background: linear-gradient(90deg, #D98A6C, var(--gift-text));
   }
 
   .state { text-align: center; padding: 40px 0 20px; color: var(--ink-muted); font-size: 14px; }
@@ -144,6 +180,9 @@
   const LIFF_ID = "2010654737-pdcVAWh6";
   const API_URL = "https://script.google.com/macros/s/AKfycbwznhk-X9suzFiAFDax9oetes93ISVoWiF5wVpipy_kWC43V298WQrdZmuFzvdphthnRg/exec";
 
+  // 排序優先度：贈禮最上面，其次堂數，最後儲值
+  const TYPE_ORDER = { "贈禮": 0, "堂數": 1, "儲值": 2 };
+
   const cardEl = document.getElementById("content");
   const uidBoxEl = document.getElementById("uidBox");
 
@@ -155,24 +194,60 @@
     uidBoxEl.innerHTML = `<div class="uid-box"><b>您的專屬編號（請截圖給店家）</b>${userId}</div>`;
   }
 
+  function renderCourseBody(c, isGift) {
+    const type = (c.type || "").toString().trim();
+
+    if (type === "儲值") {
+      const balance = Number(c.balance || 0);
+      const totalBalance = Number(c.totalBalance || 0);
+      if (totalBalance > 0) {
+        const percent = Math.min(100, Math.round((balance / totalBalance) * 100));
+        return `
+          <div class="course-balance">NT$ ${balance.toLocaleString()}<span>剩餘 / 共儲值 NT$ ${totalBalance.toLocaleString()}</span></div>
+          <div class="progress-bar" style="margin-top:8px;"><div class="progress-fill" style="width:${percent}%"></div></div>
+        `;
+      }
+      return `<div class="course-balance">NT$ ${balance.toLocaleString()}<span>儲值餘額</span></div>`;
+    }
+
+    // 堂數 或 贈禮 都用堂數進度顯示
+    const used = Number(c.usedSessions || 0);
+    const total = Number(c.totalSessions || 0);
+    const percent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+    return `
+      <div class="course-progress-top">
+        <span>課程堂數</span>
+        <span>${used} / ${total || "-"}</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill ${isGift ? "gift" : ""}" style="width:${percent}%"></div></div>
+    `;
+  }
+
   function renderCard(data) {
     const name = data.name || "親愛的貴賓";
-    const courses = Array.isArray(data.courses) ? data.courses : [];
+    let courses = Array.isArray(data.courses) ? data.courses.slice() : [];
+
+    courses.sort((a, b) => {
+      const ta = (a.type || "").toString().trim();
+      const tb = (b.type || "").toString().trim();
+      const oa = TYPE_ORDER.hasOwnProperty(ta) ? TYPE_ORDER[ta] : 1;
+      const ob = TYPE_ORDER.hasOwnProperty(tb) ? TYPE_ORDER[tb] : 1;
+      return oa - ob;
+    });
 
     const coursesHtml = courses.map((c) => {
-      const balance = Number(c.balance || 0);
-      const used = Number(c.usedSessions || 0);
-      const total = Number(c.totalSessions || 0);
-      const percent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+      const type = (c.type || "").toString().trim();
+      const isGift = type === "贈禮";
+      const tagLabel = isGift ? "當月贈禮" : (type === "儲值" ? "儲值制" : "堂數制");
+      const noteHtml = c.note ? `<div class="course-note">${c.note}</div>` : "";
       return `
-        <div class="course-item">
-          <div class="course-name">${c.courseName || "未命名課程"}</div>
-          <div class="course-balance">NT$ ${balance.toLocaleString()}<span>儲值餘額</span></div>
-          <div class="course-progress-top">
-            <span>課程堂數</span>
-            <span>${used} / ${total || "-"}</span>
+        <div class="course-item ${isGift ? "gift" : ""}">
+          <div class="course-top-row">
+            <div class="course-name">${c.courseName || "未命名課程"}</div>
+            <div class="course-type-tag ${isGift ? "gift" : ""}">${tagLabel}</div>
           </div>
-          <div class="progress-bar"><div class="progress-fill" style="width:${percent}%"></div></div>
+          ${renderCourseBody(c, isGift)}
+          ${noteHtml}
         </div>
       `;
     }).join("");
